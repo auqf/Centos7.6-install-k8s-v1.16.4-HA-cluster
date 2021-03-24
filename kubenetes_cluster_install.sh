@@ -90,6 +90,7 @@ EOF
 "exec-opts": ["native.cgroupdriver=systemd"]
 }
 EOF
+    sed -i.bak 's/- --port=0/#&/' /etc/kubernetes/manifests/{kube-controller-manager.yaml,kube-scheduler.yaml}
     systemctl enable docker && systemctl restart docker
     systemctl enable kubelet && systemctl restart kubelet
     systemctl restart chronyd
