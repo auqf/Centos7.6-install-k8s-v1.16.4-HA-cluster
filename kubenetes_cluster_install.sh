@@ -47,6 +47,7 @@ for i in "${!ETCDHOSTS[@]}"; do
 	ssh $HOST "\systemctl disable firewalld && systemctl stop firewalld"
 	ssh $HOST "\setenforce 0 && sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config"
 	ssh $HOST "\swapoff -a"
+	ssh $HOST "\swapoff -a && sed -i.bak '/swap/s/^/#/' /etc/fstab"
     
     #init the etcd cluster config file
     cat << EOF > /tmp/$NAME.conf
