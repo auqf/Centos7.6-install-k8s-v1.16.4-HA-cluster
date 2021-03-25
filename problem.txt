@@ -1,0 +1,133 @@
+自学k8s-kubeadm部署过程中遇到的dial tcp 127.0.0.1:10251: connect: connection refused错误
+问题现象
+部署完master节点以后，执行kubectl get cs命令来检测组件的运行状态时，报如下错误：
+
+[root@k8s-master yum.repos.d]# kubectl get cs
+Warning: v1 ComponentStatus is deprecated in v1.19+
+NAME                 STATUS      MESSAGE                                                                                       ERROR
+scheduler            Unhealthy   Get "http://127.0.0.1:10251/healthz": dial tcp 127.0.0.1:10251: connect: connection refused   
+controller-manager   Unhealthy   Get "http://127.0.0.1:10252/healthz": dial tcp 127.0.0.1:10252: connect: connection refused   
+etcd-0               Healthy     {"health":"true"}                                                                             
+[root@k8s-master yum.repos.d]# wget http://127.0.0.1:10251/healthz
+--2020-11-14 00:10:51--  http://127.0.0.1:10251/healthz
+Connecting to 127.0.0.1:10251... failed: Connection refused.
+原因分析
+出现这种情况，是/etc/kubernetes/manifests/下的kube-controller-manager.yaml和kube-scheduler.yaml设置的默认端口是0导致的，解决方式是注释掉对应的port即可，操作如下：
+
+　
+
+[root@k8s-master manifests]# ls
+etcd.yaml  kube-apiserver.yaml  kube-controller-manager.yaml  kube-scheduler.yaml
+[root@k8s-master manifests]# pwd
+/etc/kubernetes/manifests
+[root@k8s-master manifests]#
+kube-controller-manager.yaml文件修改：注释掉27行
+1 apiVersion: v1
+2 kind: Pod
+3 metadata:
+4 creationTimestamp: null
+5 labels:
+6 component: kube-controller-manager
+7 tier: control-plane
+8 name: kube-controller-manager
+9 namespace: kube-system
+10 spec:
+11 containers:
+12 - command:
+13 - kube-controller-manager
+14 - --allocate-node-cidrs=true
+15 - --authentication-kubeconfig=/etc/kubernetes/controller-manager.conf
+16 - --authorization-kubeconfig=/etc/kubernetes/controller-manager.conf
+17 - --bind-address=127.0.0.1
+18 - --client-ca-file=/etc/kubernetes/pki/ca.crt
+19 - --cluster-cidr=10.244.0.0/16
+20 - --cluster-name=kubernetes
+21 - --cluster-signing-cert-file=/etc/kubernetes/pki/ca.crt
+22 - --cluster-signing-key-file=/etc/kubernetes/pki/ca.key
+23 - --controllers=*,bootstrapsigner,tokencleaner
+24 - --kubeconfig=/etc/kubernetes/controller-manager.conf
+25 - --leader-elect=true
+26 - --node-cidr-mask-size=24
+27 # - --port=0
+28 - --requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt
+29 - --root-ca-file=/etc/kubernetes/pki/ca.crt
+30 - --service-account-private-key-file=/etc/kubernetes/pki/sa.key
+31 - --service-cluster-ip-range=10.1.0.0/16
+32 - --use-service-account-credentials=true
+
+kube-scheduler.yaml配置修改：注释掉19行,- --port=0
+1 apiVersion: v1
+2 kind: Pod
+3 metadata:
+4 creationTimestamp: null
+5 labels:
+6 component: kube-scheduler
+7 tier: control-plane
+8 name: kube-scheduler
+9 namespace: kube-system
+10 spec:
+11 containers:
+12 - command:
+13 - kube-scheduler
+14 - --authentication-kubeconfig=/etc/kubernetes/scheduler.conf
+15 - --authorization-kubeconfig=/etc/kubernetes/scheduler.conf
+16 - --bind-address=127.0.0.1
+17 - --kubeconfig=/etc/kubernetes/scheduler.conf
+18 - --leader-elect=true
+19 # - --port=0
+
+然后在master节点上重启kubelet，systemctl restart kubelet.service，然后重新查看就正常了
+
+[root@k8s-master manifests]# vim kube-controller-manager.yaml
+[root@k8s-master manifests]# vim kube-scheduler.yaml
+[root@k8s-master manifests]# vim kube-controller-manager.yaml
+[root@k8s-master manifests]# systemctl restart kubelet.service
+[root@k8s-master manifests]# kubectl get cs
+Warning: v1 ComponentStatus is deprecated in v1.19+
+NAME                 STATUS    MESSAGE             ERROR
+scheduler            Healthy   ok                  
+controller-manager   Healthy   ok                  
+etcd-0               Healthy   {"health":"true"}   
+[root@k8s-master manifests]# 
+
+
+
+
+Readiness probe failed: caliconode is not ready: BIRD is not ready: BGP not established with 10.117.
+
+༺࿈誓言࿈༻ 2019-09-06 15:18:42  10185  收藏 1
+分类专栏： kubernetes
+版权
+Calico 问题排障
+// 错误信息
+
+:Readiness probe failed: caliconode is not ready: BIRD is not ready: BGP not established with 10.117.150.23
+
+
+1
+2
+3
+4
+5
+估计是没用发现实际真正的网卡
+解决方法
+/*
+调整calicao 网络插件的网卡发现机制，修改IP_AUTODETECTION_METHOD对应的value值。官方提供的yaml文件中，ip识别策略（IPDETECTMETHOD）没有配置，即默认为first-found，这会导致一个网络异常的ip作为nodeIP被注册，从而影响node-to-node mesh。我们可以修改成can-reach或者interface的策略，尝试连接某一个Ready的node的IP，以此选择出正确的IP。
+*/
+
+// calico.yaml 文件添加以下二行
+            - name: IP_AUTODETECTION_METHOD
+              value: "interface=ens.*"  # ens 根据实际网卡开头配置
+ 
+ // 配置如下             
+            - name: CLUSTER_TYPE
+              value: "k8s,bgp"
+            - name: IP_AUTODETECTION_METHOD
+              value: "interface=ens.*"
+              #或者 value: "interface=ens160"
+            # Auto-detect the BGP IP address.
+            - name: IP
+              value: "autodetect"
+            # Enable IPIP
+            - name: CALICO_IPV4POOL_IPIP
+              value: "Always"
